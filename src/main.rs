@@ -20,7 +20,7 @@ struct Args {
 async fn main() {
     let args = Args::parse();
 
-    let test = ffmpeg::split_video(args.input, (1920, 1080)).await;
+    let test = ffmpeg::split_video(args.input, (1920, 1080), true).await;
 
     dbg!(test.expect("shit"));
 }

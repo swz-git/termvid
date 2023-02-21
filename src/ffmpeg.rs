@@ -6,6 +6,9 @@ use std::{
     process::Stdio,
 };
 
+use ffprobe::Stream;
+use indicatif::ProgressBar;
+use regex::Regex;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::Command,
@@ -13,38 +16,18 @@ use tokio::{
 use uuid::Uuid;
 use which::which;
 
-async fn get_framerate(path: &PathBuf) -> Result<f32, Box<dyn Error>> {
-    let ffmpeg_path = which("ffprobe").ok().ok_or(
-        "Couldn't find ffprobe in path (get it here: https://ffmpeg.org/download.html)".to_owned(),
-    )?;
-
-    let mut command = Command::new(ffmpeg_path);
-    let args: Vec<&str> = "-v 0 -of csv=p=0 -select_streams v:0 -show_entries stream=r_frame_rate"
-        .split(" ")
-        .collect();
-
-    command.args(args);
-    command.arg(path.to_str().unwrap());
-
-    // command.stdout(Stdio::null());
-
-    let stdout = command
-        .output()
-        .await
-        .ok()
-        .ok_or("ffprobe failed".to_owned())?
-        .stdout;
-    let stdout_str = std::str::from_utf8(&stdout).unwrap();
-    if stdout_str.is_empty() {
-        return Err("ffprobe failed")?;
-    }
-    let split: Vec<&str> = stdout_str.trim_end().split("/").collect();
+fn get_framerate(stream: &Stream) -> f32 {
+    let split: Vec<&str> = stream.r_frame_rate.split("/").collect();
     let (numerator, denominator): (f32, f32) =
         (split[0].parse().unwrap(), split[1].parse().unwrap());
-    Ok((numerator / denominator) as f32)
+    (numerator / denominator) as f32
 }
 
-pub async fn split_video(path: PathBuf, scale: (u32, u32)) -> Result<PathBuf, Box<dyn Error>> {
+pub async fn split_video(
+    path: PathBuf,
+    scale: (u32, u32),
+    progress_bar: bool,
+) -> Result<PathBuf, Box<dyn Error>> {
     if !path.as_path().exists() {
         return Err(format!("File at `{}` does not exist", path.display()))?;
     }
@@ -60,7 +43,16 @@ pub async fn split_video(path: PathBuf, scale: (u32, u32)) -> Result<PathBuf, Bo
         .ok()
         .ok_or("Couldn't create temporary directory")?;
 
-    let fps = get_framerate(&path).await?;
+    let ffprobe_info = ffprobe::ffprobe(&path)?;
+
+    dbg!(&ffprobe_info.streams[0]);
+
+    let fps: f32 = get_framerate(&ffprobe_info.streams[0]);
+    let frames_count: u32 = ffprobe_info.streams[0]
+        .nb_frames
+        .as_ref()
+        .ok_or("Couldn't read frame count of video")?
+        .parse()?;
 
     dbg!(fps);
 
@@ -91,7 +83,12 @@ pub async fn split_video(path: PathBuf, scale: (u32, u32)) -> Result<PathBuf, Bo
         .ok_or("Failed to read stdout of ffmpeg")?;
     let mut reader = BufReader::new(stderr);
 
-    // while not finished:
+    let maybe_bar: Option<ProgressBar> = match progress_bar {
+        true => Some(ProgressBar::new(frames_count as u64).with_message("Converting video")),
+        false => None,
+    };
+
+    // while not finished
     while proc.try_wait()?.is_none() {
         let mut buf: Vec<u8> = vec![];
         let _num_bytes = reader.read_until(b'\r', &mut buf).await?;
@@ -105,7 +102,17 @@ pub async fn split_video(path: PathBuf, scale: (u32, u32)) -> Result<PathBuf, Bo
             continue;
         }
 
-        dbg!(clean_str);
+        let frames_re = Regex::new(r"^frame= *(\d+)").unwrap();
+        let current_frame: u32 = frames_re
+            .captures_iter(clean_str)
+            .next()
+            .ok_or("Couldn't read current frame count")?[1]
+            .parse()?;
+
+        match maybe_bar {
+            None => &(),
+            Some(ref bar) => &bar.set_position(current_frame as u64),
+        };
     }
 
     let proc_result = proc.wait_with_output().await?;
@@ -114,6 +121,11 @@ pub async fn split_video(path: PathBuf, scale: (u32, u32)) -> Result<PathBuf, Bo
         print!("{}", std::str::from_utf8(&proc_result.stderr)?);
         Err(format!("ffmpeg failed"))?
     }
+
+    match maybe_bar {
+        None => &(),
+        Some(ref bar) => &bar.finish(),
+    };
 
     Ok(out_dir)
 }

@@ -1,6 +1,6 @@
 [package]
 name = "termvid"
-version = "0.1.0-dev"
+version = "0.2.0"
 edition = "2021"
 description = "CLI application to play a video in the terminal"
 license = "MIT OR Apache-2.0"

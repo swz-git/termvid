@@ -60,6 +60,14 @@ struct Args {
     /// Display mode
     #[arg(value_enum, short, long, default_value_t = DisplayMode::Pad)]
     display_mode: DisplayMode,
+
+    /// Loud ffmpeg
+    #[arg(short, long, default_value_t = false)]
+    loud_ffmpeg: bool,
+
+    /// Overwrite default ffmpeg path
+    #[arg(short, long)]
+    ffmpeg_path: Option<PathBuf>,
 }
 
 fn exit_sequence() {
@@ -78,9 +86,18 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let path = args.input;
 
-    let ffmpeg_path = which("ffmpeg").ok().ok_or_else(|| {
-        "Couldn't find ffmpeg in path (get it here: https://ffmpeg.org/download.html)".to_owned()
-    })?;
+    if let Some(user_ffmpeg_path) = &args.ffmpeg_path {
+        if !user_ffmpeg_path.exists() {
+            Err("Invalid ffmpeg path")?
+        }
+    }
+
+    let ffmpeg_path = args
+        .ffmpeg_path
+        .unwrap_or(which("ffmpeg").ok().ok_or_else(|| {
+            "Couldn't find ffmpeg in path (get it here: https://ffmpeg.org/download.html or specify a custom binary with --ffmpeg-path flag)"
+                .to_owned()
+        })?);
 
     ctrlc::set_handler(|| {
         exit_sequence();
@@ -95,7 +112,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let ffmpeg_res = (term_size.1, term_size.0);
 
-    let command_args = [
+    let command_args: &[&str] = &[
         "-re",
         "-i",
         path.to_str().unwrap(),
@@ -116,14 +133,22 @@ fn main() -> Result<(), Box<dyn Error>> {
         ),
         "-f",
         "yuv4mpegpipe",
-        "-loglevel",
-        "quiet",
+        match args.loud_ffmpeg {
+            false => "-loglevel",
+            true => "",
+        },
+        match args.loud_ffmpeg {
+            false => "quiet",
+            true => "",
+        },
         "-",
     ];
 
+    let clean_command_args: Vec<&&str> = command_args.iter().filter(|x| !x.is_empty()).collect();
+
     // dbg!("ffmpeg ".to_owned() + &command_args.join(" "));
 
-    command.args(command_args);
+    command.args(clean_command_args);
 
     command.stdout(Stdio::piped());
     command.stderr(Stdio::inherit());

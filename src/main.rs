@@ -1,9 +1,4 @@
-use std::{
-    error::Error,
-    fmt::{format, Display},
-    path::PathBuf,
-    process::Stdio,
-};
+use std::{error::Error, fmt::Display, path::PathBuf, process::Stdio};
 
 use clap::Parser;
 use console::Term;
@@ -83,9 +78,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let path = args.input;
 
-    let ffmpeg_path = which("ffmpeg").ok().ok_or(
-        "Couldn't find ffmpeg in path (get it here: https://ffmpeg.org/download.html)".to_owned(),
-    )?;
+    let ffmpeg_path = which("ffmpeg").ok().ok_or_else(|| {
+        "Couldn't find ffmpeg in path (get it here: https://ffmpeg.org/download.html)".to_owned()
+    })?;
 
     ctrlc::set_handler(|| {
         exit_sequence();
@@ -171,7 +166,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let proc_result = proc.wait_with_output()?;
 
     if !proc_result.status.success() {
-        Err(format!("ffmpeg failed"))?
+        Err("ffmpeg failed")?
     };
 
     exit_sequence();

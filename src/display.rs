@@ -20,9 +20,9 @@ fn yuv_to_rgb(y: f64, u: f64, v: f64) -> (u8, u8, u8) {
     let u = u - 128.0;
     let v = v - 128.0;
 
-    let r = (y + 1.13983 * v).round().max(0.0).min(255.0) as u8;
-    let g = (y - 0.39465 * u - 0.58060 * v).round().max(0.0).min(255.0) as u8;
-    let b = (y + 2.03211 * u).round().max(0.0).min(255.0) as u8;
+    let r = (y + 1.13983 * v).round().clamp(0.0, 255.0) as u8;
+    let g = (y - 0.39465 * u - 0.58060 * v).round().clamp(0.0, 255.0) as u8;
+    let b = (y + 2.03211 * u).round().clamp(0.0, 255.0) as u8;
 
     (r, g, b)
 }
@@ -37,9 +37,6 @@ pub fn display(
     term.clear_screen()?;
     let mut buf = String::new();
 
-    let term_size = term.size();
-
-    //
     let last_color = Color::Unset;
 
     let y_plane = frame.get_y_plane();

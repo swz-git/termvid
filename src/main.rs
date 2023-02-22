@@ -100,22 +100,24 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let ffmpeg_res = (term_size.1, term_size.0);
 
-    let display_mode_str = match args.display_mode {
-        DisplayMode::Pad => format!(
-            "pad=width={}:height={}:x=({}-iw)/2:y=({}-ih)/2:color=black",
-            ffmpeg_res.0, ffmpeg_res.1, ffmpeg_res.0, ffmpeg_res.1
-        ),
-        DisplayMode::Crop => todo!("display_mode: crop"),
-    };
-
     let command_args = [
         "-re",
         "-i",
         path.to_str().unwrap(),
         "-filter_complex",
         &format!(
-            "scale=iw*2:ih,scale={}:-1,scale=-1:{},{},format=yuv444p",
-            ffmpeg_res.0, ffmpeg_res.1, display_mode_str,
+            "scale=iw*2:ih,scale={}:{}:force_original_aspect_ratio={},{},format=yuv444p",
+            ffmpeg_res.0,
+            ffmpeg_res.1,
+            match args.display_mode {
+                DisplayMode::Crop => "increase",
+                DisplayMode::Pad => "decrease",
+            },
+            match args.display_mode {
+                DisplayMode::Pad =>
+                    format!("pad={}:{}:-1:-1:color=black", ffmpeg_res.0, ffmpeg_res.1),
+                DisplayMode::Crop => format!("crop={}:{}", ffmpeg_res.0, ffmpeg_res.1),
+            },
         ),
         "-f",
         "yuv4mpegpipe",

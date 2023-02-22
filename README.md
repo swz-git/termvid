@@ -5,7 +5,7 @@
 
 ## Demo
 
-<video src="https://filebin.swz.works/api/file/F0Y8fBVdX2M"></video>
+![demo video](https://filebin.swz.works/api/file/F0Y9hKpe8sg)
 
 ## Features
 

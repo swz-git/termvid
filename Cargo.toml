@@ -2,6 +2,9 @@
 name = "termvid"
 version = "0.2.0-dev"
 edition = "2021"
+description = "CLI application to play a video in the terminal"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/swz-git/termvid"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

@@ -39,8 +39,6 @@ pub fn display(
 
     let term_size = term.size();
 
-    let add_pad = term_size.1 % 2 != 0 && false;
-
     //
     let last_color = Color::Unset;
 
@@ -84,11 +82,6 @@ pub fn display(
         }
         .to_string();
         buf.write_str(&color)?;
-
-        // write empty char at end of line if needed as padding
-        if ((i + 1) % (term_size.1 / 2) as usize) as isize == 0 && add_pad {
-            buf.write_str(" ")?;
-        }
     }
 
     std::io::Write::write(&mut term, &buf.bytes().collect::<Vec<u8>>())?;

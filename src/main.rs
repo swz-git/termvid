@@ -1,4 +1,9 @@
-use std::{error::Error, path::PathBuf, process::Stdio};
+use std::{
+    error::Error,
+    fmt::{format, Display},
+    path::PathBuf,
+    process::Stdio,
+};
 
 use clap::Parser;
 use console::Term;
@@ -18,12 +23,31 @@ pub enum PixelStyle {
     Pixel,
 }
 
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+pub enum DisplayMode {
+    Pad,
+    Crop,
+}
+
+impl Display for DisplayMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match &self {
+                DisplayMode::Crop => "crop",
+                DisplayMode::Pad => "pad",
+            },
+        )
+    }
+}
+
 /// CLI application to play a video in the terminal
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Path to video file
-    #[arg(short, long)]
+    // #[arg(short, long)]
     input: PathBuf,
 
     /// Enable audio playback
@@ -37,6 +61,10 @@ struct Args {
     /// Pixel style
     #[arg(value_enum, short, long, default_value_t = PixelStyle::Char)]
     pixel_style: PixelStyle,
+
+    /// Display mode
+    #[arg(value_enum, short, long, default_value_t = DisplayMode::Pad)]
+    display_mode: DisplayMode,
 }
 
 fn exit_sequence() {
@@ -72,14 +100,22 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let ffmpeg_res = (term_size.1, term_size.0);
 
+    let display_mode_str = match args.display_mode {
+        DisplayMode::Pad => format!(
+            "pad=width={}:height={}:x=({}-iw)/2:y=({}-ih)/2:color=black",
+            ffmpeg_res.0, ffmpeg_res.1, ffmpeg_res.0, ffmpeg_res.1
+        ),
+        DisplayMode::Crop => todo!("display_mode: crop"),
+    };
+
     let command_args = [
         "-re",
         "-i",
         path.to_str().unwrap(),
         "-filter_complex",
         &format!(
-            "scale=iw*2:ih,scale=-1:{},pad=width={}:height={}:x=({}-iw)/2:y=({}-ih)/2:color=black,format=yuv444p",
-            ffmpeg_res.1, ffmpeg_res.0, ffmpeg_res.1,ffmpeg_res.0, ffmpeg_res.1
+            "scale=iw*2:ih,scale={}:-1,scale=-1:{},{},format=yuv444p",
+            ffmpeg_res.0, ffmpeg_res.1, display_mode_str,
         ),
         "-f",
         "yuv4mpegpipe",

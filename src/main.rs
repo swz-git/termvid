@@ -126,7 +126,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "-",
     ];
 
-    dbg!("ffmpeg ".to_owned() + &command_args.join(" "));
+    // dbg!("ffmpeg ".to_owned() + &command_args.join(" "));
 
     command.args(command_args);
 

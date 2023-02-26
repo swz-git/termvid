@@ -1,8 +1,22 @@
-use std::{error::Error, fmt::Display, path::PathBuf, process::Stdio};
+use core::time;
+use std::{
+    any::Any,
+    env::temp_dir,
+    error::Error,
+    fmt::Display,
+    fs::File,
+    io::{BufRead, Read},
+    path::{Path, PathBuf},
+    process::Stdio,
+    sync::mpsc,
+    thread,
+};
 
 use clap::Parser;
 use console::Term;
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::{io::BufReader, process::Command};
+use uuid::Uuid;
 use which::which;
 use yansi::Paint;
 
@@ -81,7 +95,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
     if args.audio {
-        todo!("audio playback")
+        #[cfg(not(unix))]
+        {
+            Err("Audio playback is only supported on unix")?
+        }
     }
 
     let path = args.input;
@@ -112,12 +129,33 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let ffmpeg_res = (term_size.1, term_size.0);
 
-    let command_args: &[&str] = &[
-        "-re",
-        "-i",
+    let maybe_audio_pipe_path: Option<PathBuf> = if cfg!(unix) && args.audio {
+        Some(Path::join(
+            &temp_dir(),
+            format!("termvid-audio-pipe-{}", Uuid::new_v4()),
+        ))
+    } else {
+        None
+    };
+
+    if let Some(audio_pipe_path) = &maybe_audio_pipe_path {
+        unix_named_pipe::create(&audio_pipe_path, Some(0o777))?
+    };
+
+    let command_args: String = format!(
+        "-re -i {} {} -map 0:v -filter {} -vcodec wrapped_avframe -f yuv4mpegpipe {} -",
         path.to_str().unwrap(),
-        "-filter_complex",
-        &format!(
+        if let Some(audio_pipe_path) = &maybe_audio_pipe_path {
+            format!(
+                "-map 0:a -async 1 -acodec pcm_s16le -f wav {} -y",
+                &audio_pipe_path
+                    .to_str()
+                    .ok_or("couldn't convert audio pipe path to string")?
+            )
+        } else {
+            "".into()
+        },
+        format!(
             "scale=iw*2:ih,scale={}:{}:force_original_aspect_ratio={},{},format=yuv444p",
             ffmpeg_res.0,
             ffmpeg_res.1,
@@ -131,22 +169,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                 DisplayMode::Crop => format!("crop={}:{}", ffmpeg_res.0, ffmpeg_res.1),
             },
         ),
-        "-f",
-        "yuv4mpegpipe",
         match args.loud_ffmpeg {
-            false => "-loglevel",
+            false => "-loglevel quiet",
             true => "",
         },
-        match args.loud_ffmpeg {
-            false => "quiet",
-            true => "",
-        },
-        "-",
-    ];
+    );
 
-    let clean_command_args: Vec<&&str> = command_args.iter().filter(|x| !x.is_empty()).collect();
+    let clean_command_args: Vec<&str> = command_args.split(" ").filter(|x| !x.is_empty()).collect();
 
-    // dbg!("ffmpeg ".to_owned() + &command_args.join(" "));
+    dbg!(&command_args);
 
     command.args(clean_command_args);
 
@@ -161,6 +192,61 @@ fn main() -> Result<(), Box<dyn Error>> {
         .ok_or("Failed to read stdout of ffmpeg")?;
     let reader = BufReader::new(proc_stdout);
 
+    #[cfg(unix)]
+    let (tx, rx) = mpsc::channel::<()>();
+
+    if let Some(audio_pipe_path) = maybe_audio_pipe_path {
+        thread::spawn(move || {
+            || -> Result<(), Box<dyn Error>> {
+                let audio_pipe = unix_named_pipe::open_read(&audio_pipe_path)?;
+
+                let mut reader = BufReader::new(audio_pipe);
+
+                let host = cpal::default_host();
+
+                let device = host
+                    .default_output_device()
+                    .ok_or("Couldn't find default audio playback device")?;
+
+                let config: cpal::StreamConfig = device.default_output_config()?.config();
+
+                // let mut oogabooga: Vec<u8> = vec![];
+                // loop {
+                //     reader.read(&mut oogabooga)?;
+                //     dbg!("alalalala");
+                // }
+
+                rx.recv()?;
+
+                let stream = device.build_output_stream(
+                    &config,
+                    move |data: &mut [u8], _: &cpal::OutputCallbackInfo| {
+                        dbg!("we're getting called!");
+                        reader
+                            .read(data)
+                            .expect("Failed reading audio data from ffmpeg");
+                    },
+                    move |err| {
+                        panic!("{:?}", err);
+                    },
+                    None,
+                )?;
+                stream.play().unwrap();
+                dbg!("do we get here?");
+                Ok(())
+            }()
+            .expect("Audio player thread failed")
+        });
+
+        // let source = rodio::Decoder::new(reader)?;
+
+        // dbg!("we get here");
+
+        // stream_handle.play_raw(source.convert_samples())?;
+    }
+
+    tx.send(())?;
+
     let mut dec = y4m::decode(reader)?;
 
     // You need to enable ansi stuff on windows smh
@@ -174,10 +260,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             Ok(a) => a,
             _ => break,
         };
+
         if i == 0 {
             i += 1;
             continue;
         }
+
         display(
             frame,
             &ASCII_BY_BRIGHTNESS.chars().collect::<Vec<char>>(),

@@ -7,7 +7,6 @@ use std::{
     process::Stdio,
     sync::mpsc,
     thread,
-    time::Duration,
 };
 
 use clap::Parser;

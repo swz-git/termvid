@@ -1,20 +1,18 @@
-use core::time;
 use std::{
-    any::Any,
     env::temp_dir,
     error::Error,
     fmt::Display,
-    fs::File,
-    io::{BufRead, Read},
+    fs::OpenOptions,
     path::{Path, PathBuf},
     process::Stdio,
     sync::mpsc,
     thread,
+    time::Duration,
 };
 
 use clap::Parser;
 use console::Term;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use rodio::{OutputStream, Source};
 use std::{io::BufReader, process::Command};
 use uuid::Uuid;
 use which::which;
@@ -147,7 +145,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         path.to_str().unwrap(),
         if let Some(audio_pipe_path) = &maybe_audio_pipe_path {
             format!(
-                "-map 0:a -async 1 -acodec pcm_s16le -f wav {} -y",
+                "-map 0:a -async 0 -vsync 0 -acodec pcm_s16le -f wav {} -y",
                 &audio_pipe_path
                     .to_str()
                     .ok_or("couldn't convert audio pipe path to string")?
@@ -175,6 +173,31 @@ fn main() -> Result<(), Box<dyn Error>> {
         },
     );
 
+    let (audio_tx, audio_rx) = mpsc::channel::<()>();
+
+    if let Some(audio_pipe_path) = maybe_audio_pipe_path {
+        thread::spawn(move || {
+            || -> Result<(), Box<dyn Error>> {
+                let (_stream, stream_handle) = OutputStream::try_default().unwrap();
+
+                let fifo = OpenOptions::new()
+                    .read(true)
+                    .write(false)
+                    .open(audio_pipe_path)?;
+
+                let stream = BufReader::new(fifo);
+
+                let source = rodio::Decoder::new(stream).unwrap();
+
+                stream_handle.play_raw(source.convert_samples())?;
+
+                audio_rx.recv()?;
+                Ok(())
+            }()
+            .expect("Audio streaming thread failed");
+        });
+    }
+
     let clean_command_args: Vec<&str> = command_args.split(" ").filter(|x| !x.is_empty()).collect();
 
     dbg!(&command_args);
@@ -183,6 +206,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     command.stdout(Stdio::piped());
     command.stderr(Stdio::inherit());
+    command.stdin(Stdio::piped());
 
     let mut proc = command.spawn()?;
 
@@ -191,61 +215,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         .take()
         .ok_or("Failed to read stdout of ffmpeg")?;
     let reader = BufReader::new(proc_stdout);
-
-    #[cfg(unix)]
-    let (tx, rx) = mpsc::channel::<()>();
-
-    if let Some(audio_pipe_path) = maybe_audio_pipe_path {
-        thread::spawn(move || {
-            || -> Result<(), Box<dyn Error>> {
-                let audio_pipe = unix_named_pipe::open_read(&audio_pipe_path)?;
-
-                let mut reader = BufReader::new(audio_pipe);
-
-                let host = cpal::default_host();
-
-                let device = host
-                    .default_output_device()
-                    .ok_or("Couldn't find default audio playback device")?;
-
-                let config: cpal::StreamConfig = device.default_output_config()?.config();
-
-                // let mut oogabooga: Vec<u8> = vec![];
-                // loop {
-                //     reader.read(&mut oogabooga)?;
-                //     dbg!("alalalala");
-                // }
-
-                rx.recv()?;
-
-                let stream = device.build_output_stream(
-                    &config,
-                    move |data: &mut [u8], _: &cpal::OutputCallbackInfo| {
-                        dbg!("we're getting called!");
-                        reader
-                            .read(data)
-                            .expect("Failed reading audio data from ffmpeg");
-                    },
-                    move |err| {
-                        panic!("{:?}", err);
-                    },
-                    None,
-                )?;
-                stream.play().unwrap();
-                dbg!("do we get here?");
-                Ok(())
-            }()
-            .expect("Audio player thread failed")
-        });
-
-        // let source = rodio::Decoder::new(reader)?;
-
-        // dbg!("we get here");
-
-        // stream_handle.play_raw(source.convert_samples())?;
-    }
-
-    tx.send(())?;
 
     let mut dec = y4m::decode(reader)?;
 
@@ -275,6 +244,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         i += 1;
     }
+
+    audio_tx.send(())?;
 
     let proc_result = proc.wait_with_output()?;
 

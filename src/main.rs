@@ -200,7 +200,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let clean_command_args: Vec<&str> = command_args.split(" ").filter(|x| !x.is_empty()).collect();
 
-    dbg!(&command_args);
+    // dbg!(&command_args);
 
     command.args(clean_command_args);
 

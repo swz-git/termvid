@@ -23,10 +23,11 @@ use display::display;
 const ASCII_BY_BRIGHTNESS: &str =
     r#"$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\|()1{}[]?-_+~<>i!lI;:,"^`'. "#;
 
-#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq)]
 pub enum PixelStyle {
     Char,
     Pixel,
+    DoublePixel,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -124,7 +125,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let term_size = term.size();
 
-    let ffmpeg_res = (term_size.1, term_size.0);
+    let ffmpeg_res = if args.pixel_style == PixelStyle::DoublePixel {
+        (term_size.1, term_size.0 * 2)
+    } else {
+        (term_size.1, term_size.0)
+    };
 
     let maybe_audio_pipe_path: Option<PathBuf> = if cfg!(unix) && args.audio {
         Some(Path::join(
@@ -153,7 +158,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             "".into()
         },
         format!(
-            "scale=iw*2:ih,scale={}:{}:force_original_aspect_ratio={},{},format=yuv444p",
+            "scale=iw*2:ih{},scale={}:{}:force_original_aspect_ratio={},{},format=yuv444p",
+            if args.pixel_style == PixelStyle::DoublePixel {
+                "*2"
+            } else {
+                ""
+            },
             ffmpeg_res.0,
             ffmpeg_res.1,
             match args.display_mode {
@@ -215,7 +225,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .ok_or("Failed to read stdout of ffmpeg")?;
     let reader = BufReader::new(proc_stdout);
 
-    let mut dec = y4m::decode(reader)?;
+    let mut dec = y4m::Decoder::new(reader)?;
 
     // You need to enable ansi stuff on windows smh
     Paint::enable_windows_ascii();
@@ -239,6 +249,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             &ASCII_BY_BRIGHTNESS.chars().collect::<Vec<char>>(),
             args.color,
             args.pixel_style,
+            term_size.1, // cols
         )?;
 
         i += 1;

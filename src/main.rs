@@ -144,7 +144,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         path.to_str().unwrap(),
         if let Some(audio_pipe_path) = &maybe_audio_pipe_path {
             format!(
-                "-map 0:a -async 0 -vsync 0 -acodec pcm_s16le -f wav {} -y",
+                "-map 0:a -async 1 -vsync 1 -acodec pcm_s16le -f wav {} -y",
                 &audio_pipe_path
                     .to_str()
                     .ok_or("couldn't convert audio pipe path to string")?

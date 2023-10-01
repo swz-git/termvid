@@ -27,6 +27,12 @@ fn yuv_to_rgb(y: f64, u: f64, v: f64) -> (u8, u8, u8) {
     (r, g, b)
 }
 
+// https://gitlab.com/gnachman/iterm2/-/wikis/synchronized-updates-spec
+const DECSET: [u8; 8] = [27, 91, 63, 50, 48, 50, 54, 104];
+const DECRESET: [u8; 8] = [27, 91, 63, 50, 48, 50, 54, 108];
+
+const CURSOR_TOP_LEFT: [u8; 6] = [27, 91, 48, 59, 48, 72];
+
 pub fn display(
     frame: Frame,
     display_chars: &[char],
@@ -34,7 +40,6 @@ pub fn display(
     pixel_style: PixelStyle,
 ) -> Result<(), Box<dyn Error>> {
     let mut term = Term::stdout();
-    term.clear_screen()?;
     let mut buf = String::new();
 
     let last_color = Color::Unset;
@@ -81,7 +86,10 @@ pub fn display(
         buf.write_str(&color)?;
     }
 
+    std::io::Write::write(&mut term, &DECSET)?;
+    std::io::Write::write(&mut term, &CURSOR_TOP_LEFT)?;
     std::io::Write::write(&mut term, &buf.bytes().collect::<Vec<u8>>())?;
+    std::io::Write::write(&mut term, &DECRESET)?;
 
     Ok(())
 }
